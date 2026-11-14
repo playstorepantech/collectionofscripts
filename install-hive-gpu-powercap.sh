@@ -43,7 +43,7 @@ SCRIPT
 cat > /etc/systemd/system/hive-gpu-powerlimit.service <<'UNIT'
 [Unit]
 Description=Keep AMD GPU power caps aligned with HiveOS overclock profile
-After=hive.service
+After=network-online.target
 
 [Service]
 Type=simple
