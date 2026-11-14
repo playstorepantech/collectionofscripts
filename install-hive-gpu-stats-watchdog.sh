@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Install a guarded HiveOS GPU-stats watchdog.
+# Usage: sudo bash install-hive-gpu-stats-watchdog.sh
+# Waits 60 seconds at service start, then monitors AMD GPU stats while mining.
+# Reboots once after stats stay missing or invalid; the persistent guard prevents loops.
+# Roll back with: sudo bash /hive-config/rollback-gpu-stats-watchdog.sh
 set -euo pipefail
 
 if (( EUID != 0 )); then
