@@ -40,11 +40,9 @@ STATS=/run/hive/gpu-stats.json
 DETECT=/run/hive/gpu-detect.json
 DISABLE=/hive-config/disable-gpu-stats-watchdog
 REBOOT_MARKER=/hive-config/gpu-stats-watchdog.rebooted
-CHECK_INTERVAL=10
+CHECK_INTERVAL=5
 STALE_AFTER=60
-BAD_FOR=30
 HEALTHY_TO_RESET=300
-bad_since=0
 healthy_since=0
 
 log() { logger -t hive-gpu-stats-watchdog "$*"; }
@@ -76,7 +74,7 @@ stats_healthy() {
     ' "$STATS" >/dev/null 2>&1
 }
 
-log "Started; checking every 10s. Startup delay is 60s. Touch $DISABLE to disable."
+log "Started; checking every ${CHECK_INTERVAL}s with immediate reboot on unhealthy GPU stats. Touch $DISABLE to disable."
 while true; do
     if [[ -e $DISABLE ]]; then
         log "Disable file found; exiting without reboot."
@@ -84,15 +82,13 @@ while true; do
     fi
 
     if ! mining; then
-        bad_since=0
-        healthy_since=0
+                healthy_since=0
         sleep "$CHECK_INTERVAL"
         continue
     fi
 
     if stats_healthy; then
-        bad_since=0
-        if [[ -s $REBOOT_MARKER ]]; then
+                if [[ -s $REBOOT_MARKER ]]; then
             ((healthy_since == 0)) && healthy_since=$(date +%s)
             if (( $(date +%s) - healthy_since >= HEALTHY_TO_RESET )); then
                 : > "$REBOOT_MARKER"
@@ -103,20 +99,14 @@ while true; do
         fi
     else
         healthy_since=0
-        ((bad_since == 0)) && bad_since=$(date +%s)
-        bad_for=$(( $(date +%s) - bad_since ))
-
-        if ((bad_for >= BAD_FOR)); then
-            if [[ -s $REBOOT_MARKER ]]; then
-                log "GPU stats remain missing, but reboot was already attempted for this incident; suppressing another reboot."
-            else
-                printf '%s\n' "$(date +%s)" > "$REBOOT_MARKER"
-                sync
-                log "GPU stats missing, stale, or incomplete for ${bad_for}s while miner is running; rebooting once."
-                sleep 5
-                /usr/bin/systemctl reboot
-                exit 0
-            fi
+        if [[ -s $REBOOT_MARKER ]]; then
+            log "GPU stats are missing, stale, or incomplete, but reboot was already attempted for this incident; suppressing another reboot."
+        else
+            printf '%s\n' "$(date +%s)" > "$REBOOT_MARKER"
+            sync
+            log "GPU stats are missing, stale, or incomplete while miner is running; rebooting immediately."
+            /usr/bin/systemctl reboot
+            exit 0
         fi
     fi
     sleep "$CHECK_INTERVAL"
@@ -134,11 +124,11 @@ SCRIPT
 cat > /hive-config/hive-gpu-stats-watchdog.service <<'UNIT'
 [Unit]
 Description=Reboot once if HiveOS GPU stats disappear during mining
-After=hive.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=/bin/sleep 60
 ExecStart=/bin/bash /hive-config/gpu-stats-watchdog.sh
 Restart=on-failure
 RestartSec=10
@@ -153,6 +143,6 @@ systemctl daemon-reload
 systemctl enable hive-gpu-stats-watchdog.service
 systemctl restart hive-gpu-stats-watchdog.service
 
-echo "Installed watchdog. It waits 60s after service start, then monitors mining GPU stats."
+echo "Installed watchdog. It checks GPU stats every 5s while mining and reboots immediately on an unhealthy check."
 echo "Rollback: bash /hive-config/rollback-gpu-stats-watchdog.sh"
 echo "Checkpoint: $checkpoint"
